@@ -1,0 +1,16 @@
+{
+  "name": "arkos-discord-tip-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Discord tipping bot for the Arkovia ARKOS digital economy.",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "register": "node src/register-commands.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "discord.js": "^14.18.0",
+    "dotenv": "^16.4.7"
+  }
+}
