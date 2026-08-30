@@ -29,6 +29,9 @@ export const config = {
   tipUnitNqt: BigInt(process.env.TIP_UNIT_NQT || "100000"), // 0.001 ARKOS
   withdrawMinNqt: decimalToNqt(process.env.WITHDRAW_MIN_ARKOS || "2"),
   withdrawFeeNqt: decimalToNqt(process.env.WITHDRAW_FEE_ARKOS || "1"),
+  depositMinNqt: decimalToNqt(process.env.DEPOSIT_MIN_ARKOS || "5"),
+  depositRequiredConfirmations: Number(process.env.DEPOSIT_REQUIRED_CONFIRMATIONS || "3"),
+  depositScanIntervalSeconds: Number(process.env.DEPOSIT_SCAN_INTERVAL_SECONDS || "30"),
   dailyTipLimitNqt: decimalToNqt(process.env.DAILY_TIP_LIMIT_ARKOS || "2"),
   maxSingleTipUnits: BigInt(process.env.MAX_SINGLE_TIP_UNITS || "100"),
   admins: new Set((process.env.ADMIN_DISCORD_IDS || "").split(",").map(s => s.trim()).filter(Boolean))

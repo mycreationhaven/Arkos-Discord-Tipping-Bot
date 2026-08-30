@@ -9,6 +9,13 @@ export const commands = [
     .setName("arkos-balance")
     .setDescription("Show your ARKOS Discord balance."),
 
+
+new SlashCommandBuilder()
+  .setName("arkos-deposit")
+  .setDescription("Get your personal ARKOS deposit instructions."),
+
+
+
   new SlashCommandBuilder()
     .setName("arkos-tip")
     .setDescription("Tip another Discord member using tiny ARKOS tip units.")

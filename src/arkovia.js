@@ -36,6 +36,19 @@ export async function validateAccount(account) {
   return value;
 }
 
+export async function getAccountTransactions(account, firstIndex = 0, lastIndex = 99) {
+  const data = await api({
+    requestType: "getBlockchainTransactions",
+    account,
+    type: "0",
+    subtype: "0",
+    firstIndex: String(firstIndex),
+    lastIndex: String(lastIndex)
+  });
+
+  return Array.isArray(data.transactions) ? data.transactions : [];
+}
+
 export async function sendMoney({recipient, amountNqt}) {
   if (!config.hotWalletSecretPhrase || !config.hotWalletAccount) {
     throw new Error("Withdrawals are not configured on this bot.");

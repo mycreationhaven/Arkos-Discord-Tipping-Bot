@@ -2,9 +2,13 @@ import { Client, GatewayIntentBits } from "discord.js";
 import { config, formatArkos, decimalToNqt } from "./config.js";
 import {
   getOrCreateUser, getUser, setWithdrawalAccount, transferTip, tippedTodayNqt,
-  createWithdrawal, debitForWithdrawal, refundWithdrawal, completeWithdrawal
+  createWithdrawal, debitForWithdrawal, refundWithdrawal, completeWithdrawal,
+  getOrCreateDepositCode
 } from "./db.js";
 import { validateAccount, sendMoney } from "./arkovia.js";
+import { startActivityApi } from "./activity-api.js";
+import { startDepositScanner } from "./deposit-scanner.js";
+
 
 const client = new Client({intents: [GatewayIntentBits.Guilds]});
 
@@ -72,6 +76,30 @@ client.on("interactionCreate", async interaction => {
       return interaction.reply({ephemeral: true, content: `🔗 Withdrawal account set to **${account}**.`});
     }
 
+
+if (interaction.commandName === "arkos-deposit") {
+  getOrCreateUser(interaction.user.id, memberName);
+
+  const deposit = getOrCreateDepositCode(interaction.user.id);
+
+  return interaction.reply({
+    ephemeral: true,
+    content:
+      `💠 **ARKOS Deposit Instructions**\n\n` +
+      `Send ARKOS to:\n` +
+      `**${config.hotWalletAccount}**\n\n` +
+      `📝 **Required Deposit Code:**\n` +
+      `**${deposit.deposit_code}**\n\n` +
+      `⚠️ **IMPORTANT — SEND THE DEPOSIT CODE AS A PUBLIC/PLAIN-TEXT MESSAGE.**\n` +
+      `**DO NOT encrypt the message.** The ARKOS Tip Bot must be able to read the deposit code from the blockchain to identify and automatically credit your Discord account.\n\n` +
+      `Minimum deposit: **${formatArkos(config.depositMinNqt)} ARKOS**\n` +
+      `Required confirmations: **${config.depositRequiredConfirmations}**\n\n` +
+      `After the required confirmations, your ARKOS Discord balance will be credited automatically.\n\n` +
+      `❗ Deposits with a missing, incorrect, or encrypted deposit code cannot be automatically credited.`
+  });
+}
+
+
     if (interaction.commandName === "arkos-withdraw") {
       await interaction.deferReply({ephemeral: true});
       const user = getOrCreateUser(interaction.user.id, memberName);
@@ -126,5 +154,8 @@ client.on("interactionCreate", async interaction => {
     }
   }
 });
+
+startActivityApi();
+startDepositScanner();
 
 client.login(config.discordToken);

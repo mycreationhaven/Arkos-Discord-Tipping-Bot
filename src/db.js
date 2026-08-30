@@ -6,6 +6,38 @@ db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
 db.exec(`
+
+CREATE TABLE IF NOT EXISTS deposit_codes (
+  discord_id TEXT PRIMARY KEY,
+  deposit_code TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS deposits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  transaction_id TEXT NOT NULL UNIQUE,
+  full_hash TEXT,
+  sender_account TEXT,
+  recipient_account TEXT NOT NULL,
+  discord_id TEXT NOT NULL,
+  deposit_code TEXT NOT NULL,
+  amount_nqt TEXT NOT NULL,
+  confirmations INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'DETECTED',
+  block_height INTEGER,
+  credited_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_deposits_discord_id
+ON deposits(discord_id);
+
+CREATE INDEX IF NOT EXISTS idx_deposits_status
+ON deposits(status);
+
+
 CREATE TABLE IF NOT EXISTS users (
   discord_id TEXT PRIMARY KEY,
   discord_name TEXT NOT NULL,
@@ -146,6 +178,192 @@ export function completeWithdrawal(withdrawalId, txId, fullHash) {
     SET status='BROADCAST', transaction_id=?, full_hash=?, updated_at=CURRENT_TIMESTAMP
     WHERE id=?
   `).run(txId || null, fullHash || null, withdrawalId);
+}
+
+
+function makeDepositCode(discordId) {
+  const cleaned = String(discordId).replace(/\D/g, "");
+  const tail = cleaned.slice(-6).padStart(6, "0");
+  const random = Math.floor(1000 + Math.random() * 9000);
+  return `ARK-${tail}-${random}`;
+}
+
+export function getOrCreateDepositCode(discordId) {
+  const existing = db.prepare(`
+    SELECT * FROM deposit_codes WHERE discord_id=?
+  `).get(discordId);
+
+  if (existing) return existing;
+
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const code = makeDepositCode(discordId);
+
+    try {
+      db.prepare(`
+        INSERT INTO deposit_codes(discord_id, deposit_code)
+        VALUES(?, ?)
+      `).run(discordId, code);
+
+      return db.prepare(`
+        SELECT * FROM deposit_codes WHERE discord_id=?
+      `).get(discordId);
+    } catch (err) {
+      if (!String(err.message).includes("UNIQUE")) throw err;
+    }
+  }
+
+  throw new Error("Could not generate a unique deposit code.");
+}
+
+export function getDepositCode(discordId) {
+  return db.prepare(`
+    SELECT * FROM deposit_codes WHERE discord_id=?
+  `).get(discordId);
+}
+
+export function getDepositCodeOwner(depositCode) {
+  return db.prepare(`
+    SELECT * FROM deposit_codes WHERE deposit_code=?
+  `).get(depositCode);
+}
+
+export function getDepositByTransaction(transactionId) {
+  return db.prepare(`
+    SELECT * FROM deposits WHERE transaction_id=?
+  `).get(transactionId);
+}
+
+export function recordDetectedDeposit({
+  transactionId,
+  fullHash = null,
+  senderAccount = null,
+  recipientAccount,
+  discordId,
+  depositCode,
+  amountNqt,
+  confirmations = 0,
+  blockHeight = null
+}) {
+  db.prepare(`
+    INSERT OR IGNORE INTO deposits(
+      transaction_id,
+      full_hash,
+      sender_account,
+      recipient_account,
+      discord_id,
+      deposit_code,
+      amount_nqt,
+      confirmations,
+      status,
+      block_height
+    )
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'DETECTED', ?)
+  `).run(
+    transactionId,
+    fullHash,
+    senderAccount,
+    recipientAccount,
+    discordId,
+    depositCode,
+    amountNqt.toString(),
+    confirmations,
+    blockHeight
+  );
+
+  return getDepositByTransaction(transactionId);
+}
+
+export function updateDepositConfirmations(
+  transactionId,
+  confirmations,
+  blockHeight = null
+) {
+  db.prepare(`
+    UPDATE deposits
+    SET confirmations=?,
+        block_height=COALESCE(?, block_height),
+        updated_at=CURRENT_TIMESTAMP
+    WHERE transaction_id=?
+  `).run(confirmations, blockHeight, transactionId);
+}
+
+export const creditDeposit = db.transaction((transactionId) => {
+  const deposit = db.prepare(`
+    SELECT * FROM deposits WHERE transaction_id=?
+  `).get(transactionId);
+
+  if (!deposit) {
+    throw new Error("Deposit not found.");
+  }
+
+  if (deposit.status === "CREDITED") {
+    return {
+      credited: false,
+      deposit
+    };
+  }
+
+  const user = getUserStmt.get(deposit.discord_id);
+
+  if (!user) {
+    throw new Error("Deposit Discord user is not registered.");
+  }
+
+  const amount = BigInt(deposit.amount_nqt);
+  const currentBalance = BigInt(user.balance_nqt);
+
+  db.prepare(`
+    UPDATE users
+    SET balance_nqt=?,
+        updated_at=CURRENT_TIMESTAMP
+    WHERE discord_id=?
+  `).run(
+    (currentBalance + amount).toString(),
+    deposit.discord_id
+  );
+
+  db.prepare(`
+    INSERT INTO ledger(
+      type,
+      to_discord_id,
+      amount_nqt,
+      metadata_json
+    )
+    VALUES('DEPOSIT', ?, ?, ?)
+  `).run(
+    deposit.discord_id,
+    deposit.amount_nqt,
+    JSON.stringify({
+      transactionId: deposit.transaction_id,
+      fullHash: deposit.full_hash,
+      senderAccount: deposit.sender_account,
+      depositCode: deposit.deposit_code
+    })
+  );
+
+  db.prepare(`
+    UPDATE deposits
+    SET status='CREDITED',
+        credited_at=CURRENT_TIMESTAMP,
+        updated_at=CURRENT_TIMESTAMP
+    WHERE transaction_id=?
+  `).run(transactionId);
+
+  return {
+    credited: true,
+    deposit: db.prepare(`
+      SELECT * FROM deposits WHERE transaction_id=?
+    `).get(transactionId)
+  };
+});
+
+export function listPendingDeposits() {
+  return db.prepare(`
+    SELECT *
+    FROM deposits
+    WHERE status='DETECTED'
+    ORDER BY id ASC
+  `).all();
 }
 
 export default db;
